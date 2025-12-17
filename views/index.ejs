@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ModelEditor | Dev Blog by Today_Idk</title>
+    <link rel="stylesheet" href="/style.css">
+    <script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <div class="logo">
+                <h1>Model<span>Editor</span></h1>
+                <div class="author">by Today_Idk</div>
+            </div>
+            <nav>
+                <a href="/">Home</a>
+                <a href="/admin" class="admin-link">Admin Panel</a>
+            </nav>
+        </div>
+    </header>
+
+    <main class="container">
+        <section class="hero">
+            <h2>News & Updates</h2>
+            <p>Stay tuned for the latest features of the ModelEditor.</p>
+        </section>
+
+        <div class="feed">
+            <% if (updates && updates.length > 0) { %>
+                <% updates.forEach(post => { %>
+                    <article class="post">
+                        <div class="post-sidebar">
+                            <span class="version">v<%= post.version %></span>
+                            <span class="date"><%= post.date %></span>
+                        </div>
+                        <div class="post-content">
+                            <div class="tag"><%= post.tag %></div>
+                            <h3><%= post.title %></h3>
+                            <p><%= post.text %></p>
+                            <% if (post.downloadUrl) { %>
+                                <a href="<%= post.downloadUrl %>" class="download-btn">Download ZIP</a>
+                            <% } %>
+                        </div>
+                    </article>
+                <% }); %>
+            <% } else { %>
+                <p class="empty">No updates yet. Check the admin panel to create the first post!</p>
+            <% } %>
+        </div>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>&copy; 2025 ModelEditor Project. Developer: <strong>Today_Idk</strong></p>
+        </div>
+    </footer>
+
+    <script>
+        const socket = io();
+        const feed = document.querySelector('.feed');
+
+        socket.on('newPost', (post) => {
+            console.log("New post received via socket:", post);
+
+            // Construct the HTML for the new post
+            const postHTML = `
+                <article class="post new-post-animation">
+                    <div class="post-sidebar">
+                        <span class="version">v${post.version}</span>
+                        <span class="date">${post.date}</span>
+                    </div>
+                    <div class="post-content">
+                        <div class="tag">${post.tag}</div>
+                        <h3>${post.title}</h3>
+                        <p>${post.text}</p>
+                        ${post.downloadUrl ? `<a href="${post.downloadUrl}" class="download-btn">Download ZIP</a>` : ''}
+                    </div>
+                </article>
+            `;
+
+            // Remove empty message if it exists
+            const emptyMsg = document.querySelector('.empty');
+            if (emptyMsg) emptyMsg.remove();
+
+            // Insert the new post at the top of the feed
+            feed.insertAdjacentHTML('afterbegin', postHTML);
+        });
+    </script>
+
+    <style>
+        /* Additional styling for the Download button and Animations */
+        .download-btn {
+            display: inline-block;
+            margin-top: 15px;
+            padding: 8px 16px;
+            background: var(--accent);
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+            font-size: 0.9em;
+            transition: opacity 0.2s;
+        }
+
+        .download-btn:hover {
+            opacity: 0.8;
+        }
+
+        .new-post-animation {
+            animation: slideIn 0.6s cubic-bezier(0.23, 1, 0.32, 1) both;
+            border-color: var(--accent) !important;
+            box-shadow: 0 0 15px var(--accent-glow);
+        }
+
+        @keyframes slideIn {
+            0% { opacity: 0; transform: translateY(-30px); }
+            100% { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</body>
+</html>
