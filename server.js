@@ -139,10 +139,16 @@ app.post('/community/post', (req, res) => {
     res.redirect('/community');
 });
 
-// 5. Admin Panel & API
 app.get('/admin', (req, res) => {
     if (req.session.user && req.session.user.role === 'admin') {
-        res.render('admin', { user: req.session.user }); // Создай views/admin.ejs на основе своего HTML
+        // Получаем последнюю версию из БД для отображения в админке
+        const lastPost = db.prepare('SELECT version FROM posts ORDER BY id DESC LIMIT 1').get();
+        const v = lastPost ? lastPost.version : "0.3";
+        
+        res.render('admin', { 
+            user: req.session.user, 
+            currentVersion: v // Теперь переменная передана в EJS
+        });
     } else {
         res.status(403).send("Denied");
     }
