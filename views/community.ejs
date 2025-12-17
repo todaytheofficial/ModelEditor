@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>ModelEditor | Community</title>
+    <link rel="stylesheet" href="/style.css">
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        .comm-container { margin-top: 30px; }
+        .post-form { background: var(--bg-card); padding: 20px; border-radius: 12px; margin-bottom: 20px; }
+        .post-form textarea { width: 100%; background: #0b0e14; border: 1px solid #333; color: white; padding: 10px; border-radius: 5px; resize: none; }
+        .comm-post { background: var(--bg-card); border: 1px solid #2d333b; padding: 20px; border-radius: 12px; margin-bottom: 20px; }
+        .comm-post b { color: var(--accent); }
+        .comments-section { margin-top: 15px; padding-top: 15px; border-top: 1px solid #2d333b; font-size: 14px; }
+        .comment { margin-bottom: 5px; color: var(--text-dim); }
+        .comment b { color: #eee; }
+        .comment-input-group { display: flex; gap: 5px; margin-top: 10px; }
+        .comment-input-group input { flex: 1; background: #0b0e14; border: 1px solid #333; color: white; padding: 5px; }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <div class="logo"><h1>Model<span>Community</span></h1></div>
+            <nav><a href="/" style="color:white">Back to Dev Blog</a></nav>
+        </div>
+    </header>
+
+    <main class="container comm-container">
+        <% if (user) { %>
+            <div class="post-form">
+                <h3>Share something with the community</h3>
+                <form action="/community/post" method="POST">
+                    <textarea name="content" rows="3" placeholder="What's on your mind?" required></textarea>
+                    <button type="submit" class="download-btn" style="margin-top:10px; width:100%">Post</button>
+                </form>
+            </div>
+        <% } else { %>
+            <p style="text-align:center">Please <a href="/">Login</a> to participate in discussions.</p>
+        <% } %>
+
+        <div id="community-feed">
+            <% posts.forEach(post => { %>
+                <div class="comm-post" id="post-<%= post.id %>">
+                    <div style="display:flex; justify-content:space-between">
+                        <b>@<%= post.username %></b>
+                        <small class="date"><%= post.date %></small>
+                    </div>
+                    <p><%= post.content %></p>
+                    
+                    <div class="comments-section" id="comments-<%= post.id %>">
+                        <div class="comment-input-group">
+                            <input type="text" id="input-<%= post.id %>" placeholder="Write a comment...">
+                            <button onclick="sendComment('<%= post.id %>')">Send</button>
+                        </div>
+                    </div>
+                </div>
+            <% }); %>
+        </div>
+    </main>
+
+    <script>
+        const socket = io();
+        const currentUser = "<%= user ? user.username : '' %>";
+
+        // Новый пост через сокеты
+        socket.on('newCommunityPost', (post) => {
+            const html = `
+                <div class="comm-post" style="animation: slideIn 0.3s ease">
+                    <b>@${post.username}</b>
+                    <p>${post.content}</p>
+                    <small>${post.date}</small>
+                </div>`;
+            document.getElementById('community-feed').insertAdjacentHTML('afterbegin', html);
+        });
+
+        // Отправка комментария
+        function sendComment(postId) {
+            if (!currentUser) return alert("Login first!");
+            const text = document.getElementById(`input-${postId}`).value;
+            if (!text) return;
+
+            socket.emit('sendComment', {
+                postId: postId,
+                username: currentUser,
+                text: text
+            });
+            document.getElementById(`input-${postId}`).value = '';
+        }
+
+        // Получение комментария
+        socket.on('receiveComment', (data) => {
+            const container = document.getElementById(`comments-${data.postId}`);
+            if (container) {
+                const commentHtml = `<div class="comment"><b>${data.username}:</b> ${data.text} <small>(${data.date})</small></div>`;
+                container.insertAdjacentHTML('afterbegin', commentHtml);
+            }
+        });
+    </script>
+</body>
+</html>

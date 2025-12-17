@@ -6,15 +6,16 @@ const { Server } = require('socket.io');
 const Database = require('better-sqlite3');
 const bcrypt = require('bcrypt');
 const session = require('express-session');
+const fs = require('fs');
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-// --- НАСТРОЙКА БАЗЫ ДАННЫХ (SQLite) ---
+// --- НАСТРОЙКА БАЗЫ ДАННЫХ ---
 const db = new Database('database.db');
 
-// Создаем таблицы, если их нет
+// Создаем таблицы (Обновлено: добавлены таблицы для Community)
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -31,23 +32,33 @@ db.exec(`
     tag TEXT,
     downloadUrl TEXT
   );
+  CREATE TABLE IF NOT EXISTS community_posts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT,
+    content TEXT,
+    date TEXT
+  );
+  CREATE TABLE IF NOT EXISTS comments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    post_id INTEGER,
+    username TEXT,
+    text TEXT,
+    date TEXT
+  );
 `);
 
-// --- СОЗДАНИЕ АДМИНА ПРИ ЗАПУСКЕ ---
+// --- АДМИН ПРИ ЗАПУСКЕ ---
 const ADMIN_USER = "Today_Idk";
-const ADMIN_PASS = "secretpassword)_(&@#$#(@*)$%&@#*^%&@*#(%^@#(*756(^%@&#%@#^&%@("; // ПАРОЛЬ ПО УМОЛЧАНИЮ
-
+const ADMIN_PASS = "secretpassword)_(&@#$#(@*)$%&@#*^%&@*#(%^@#(*756(^%@&#%@#^&%@("; 
 const stmt = db.prepare('SELECT * FROM users WHERE username = ?');
 if (!stmt.get(ADMIN_USER)) {
     const hash = bcrypt.hashSync(ADMIN_PASS, 10);
-    const insert = db.prepare('INSERT INTO users (username, password, role) VALUES (?, ?, ?)');
-    insert.run(ADMIN_USER, hash, 'admin');
-    console.log(`[INFO] Создан аккаунт админа: ${ADMIN_USER} / ${ADMIN_PASS}`);
+    db.prepare('INSERT INTO users (username, password, role) VALUES (?, ?, ?)').run(ADMIN_USER, hash, 'admin');
+    console.log(`[INFO] Admin created: ${ADMIN_USER}`);
 }
 
-// --- НАСТРОЙКИ SERVER ---
+// --- МИДДЛВАРЫ ---
 const UPLOAD_DIR = 'public/uploads';
-const fs = require('fs');
 if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 const storage = multer.diskStorage({
@@ -61,87 +72,85 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 app.set('view engine', 'ejs');
 
-// Сессии (для входа в систему)
 app.use(session({
-    secret: 'super_secret_key_change_me',
+    secret: 'model_editor_secret_2025',
     resave: false,
     saveUninitialized: false,
-    cookie: { maxAge: 24 * 60 * 60 * 1000 } // 24 часа
+    cookie: { maxAge: 24 * 60 * 60 * 1000 }
 }));
 
 // --- ROUTES ---
 
-// Главная
+// 1. Главная (Dev Blog)
 app.get('/', (req, res) => {
     const posts = db.prepare('SELECT * FROM posts ORDER BY id DESC').all();
-    res.render('index', { 
-        user: req.session.user, 
-        updates: posts 
-    });
+    res.render('index', { user: req.session.user, updates: posts });
 });
 
-// Регистрация
+// 2. Community Page
+app.get('/community', (req, res) => {
+    // Получаем посты и сразу подтягиваем комменты для каждого (простой метод)
+    const posts = db.prepare('SELECT * FROM community_posts ORDER BY id DESC').all();
+    posts.forEach(post => {
+        post.comments = db.prepare('SELECT * FROM comments WHERE post_id = ? ORDER BY id ASC').all(post.id);
+    });
+    res.render('community', { user: req.session.user, posts: posts });
+});
+
+// 3. Auth
 app.post('/register', async (req, res) => {
     const { username, password } = req.body;
     try {
         const hash = await bcrypt.hash(password, 10);
-        const insert = db.prepare('INSERT INTO users (username, password) VALUES (?, ?)');
-        insert.run(username, hash);
+        db.prepare('INSERT INTO users (username, password) VALUES (?, ?)').run(username, hash);
         req.session.user = { username, role: 'user' };
         res.redirect('/');
     } catch (e) {
-        res.send('<script>alert("Такой пользователь уже существует!"); window.location.href="/";</script>');
+        res.send('<script>alert("User exists!"); window.location.href="/";</script>');
     }
 });
 
-// Вход
 app.post('/login', async (req, res) => {
     const { username, password } = req.body;
     const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
-    
     if (user && await bcrypt.compare(password, user.password)) {
         req.session.user = { username: user.username, role: user.role };
         res.redirect('/');
     } else {
-        res.send('<script>alert("Неверный логин или пароль"); window.location.href="/";</script>');
+        res.send('<script>alert("Wrong password"); window.location.href="/";</script>');
     }
 });
 
-// Выход
 app.get('/logout', (req, res) => {
     req.session.destroy();
     res.redirect('/');
 });
 
-// Админка (Только для админа)
+// 4. Community Posting
+app.post('/community/post', (req, res) => {
+    if (!req.session.user) return res.status(403).send("Login required");
+    const { content } = req.body;
+    const date = new Date().toLocaleString();
+    const insert = db.prepare('INSERT INTO community_posts (username, content, date) VALUES (?, ?, ?)');
+    const info = insert.run(req.session.user.username, content, date);
+    
+    const newPost = { id: info.lastInsertRowid, username: req.session.user.username, content, date, comments: [] };
+    io.emit('newCommunityPost', newPost);
+    res.redirect('/community');
+});
+
+// 5. Admin Panel & API
 app.get('/admin', (req, res) => {
     if (req.session.user && req.session.user.role === 'admin') {
-        res.send(`
-            <link rel="stylesheet" href="/style.css">
-            <div class="container" style="margin-top:50px">
-                <h1>Admin Panel: ${req.session.user.username}</h1>
-                <a href="/" style="color:white">Back to Home</a>
-                <hr>
-                <form action="/add-post" method="POST" enctype="multipart/form-data" class="post" style="flex-direction:column; padding:30px; gap:15px">
-                    <h2>New Update</h2>
-                    <input name="title" placeholder="Update Title" required style="padding:10px">
-                    <input name="version" placeholder="Version (e.g. 1.2)" required style="padding:10px">
-                    <textarea name="text" placeholder="Changes..." rows="5" style="padding:10px"></textarea>
-                    <input type="file" name="updateZip" accept=".zip" required>
-                    <button type="submit" class="download-btn">Publish</button>
-                </form>
-            </div>
-        `);
+        res.render('admin', { user: req.session.user }); // Создай views/admin.ejs на основе своего HTML
     } else {
-        res.status(403).send("Access Denied.");
+        res.status(403).send("Denied");
     }
 });
 
-// Публикация поста
 app.post('/add-post', upload.single('updateZip'), (req, res) => {
     if (!req.session.user || req.session.user.role !== 'admin') return res.status(403).send("Forbidden");
-    
-    const newPost = {
+    const newUpdate = {
         title: req.body.title,
         version: req.body.version,
         text: req.body.text,
@@ -149,25 +158,39 @@ app.post('/add-post', upload.single('updateZip'), (req, res) => {
         tag: "Update",
         downloadUrl: `/uploads/${req.file.filename}`
     };
+    db.prepare('INSERT INTO posts (title, version, text, date, tag, downloadUrl) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(newUpdate.title, newUpdate.version, newUpdate.text, newUpdate.date, newUpdate.tag, newUpdate.downloadUrl);
     
-    const insert = db.prepare('INSERT INTO posts (title, version, text, date, tag, downloadUrl) VALUES (?, ?, ?, ?, ?, ?)');
-    insert.run(newPost.title, newPost.version, newPost.text, newPost.date, newPost.tag, newPost.downloadUrl);
-
-    io.emit('newPost', newPost);
+    io.emit('newPost', newUpdate);
     res.redirect('/');
 });
 
-// API для C++
 app.get('/api/version', (req, res) => {
     const post = db.prepare('SELECT * FROM posts ORDER BY id DESC LIMIT 1').get();
-    if (post) {
-        res.json({ version: post.version, title: post.title, url: post.downloadUrl });
-    } else {
-        res.json({ version: "0.0", url: "" });
-    }
+    res.json(post ? { version: post.version, url: post.downloadUrl } : { version: "0.0", url: "" });
+});
+
+// --- SOCKET.IO LOGIC ---
+io.on('connection', (socket) => {
+    console.log('User connected');
+
+    socket.on('sendComment', (data) => {
+        if (!data.username || !data.text) return;
+        const date = new Date().toLocaleTimeString();
+        const insert = db.prepare('INSERT INTO comments (post_id, username, text, date) VALUES (?, ?, ?, ?)');
+        insert.run(data.postId, data.username, data.text, date);
+
+        // Рассылаем всем
+        io.emit('receiveComment', {
+            postId: data.postId,
+            username: data.username,
+            text: data.text,
+            date: date
+        });
+    });
 });
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`Server: http://localhost:${PORT}`);
 });
